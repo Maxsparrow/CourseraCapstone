@@ -1,4 +1,4 @@
-dirpath<-"Data Scientist Specialization/Capstone/final/en_US/"
+dirpath<-"Data Scientist Specialization/CourseraCapstone/final/en_US/"
 
 readfile<-function(filetype) {
     curfile<-file(paste0(dirpath,"en_US.",filetype,".txt"))
@@ -6,10 +6,6 @@ readfile<-function(filetype) {
     close(curfile)
     return(output)
 }
-
-if(!exists("twitter")) twitter<-readfile("twitter")
-if(!exists("news")) news<-readfile("news")
-if(!exists("blogs")) blogs<-readfile("blogs")
 
 summarizefile<-function(file) {
     print(paste0('Number of documents in file: ',length(file)))
@@ -35,49 +31,72 @@ getsample<-function(file,size) {
     return(sample)
 }
 
+countwords<-function(sample) {
+    count<-0
+    for(line in sample) {count<-count+length(strsplit(line," ")[[1]])}
+    return(count)
+}
+
 scrubsample<-function(sample) {
     set<-vector()
     for(item in sample) {
-        item<-gsub("<3"," heartsymbolplaceholder ",item)
+        Encoding(item)<-"latin1"
+        item<-iconv(item,"latin1","ASCII",sub="")
         item<-gsub("[-?:.\"<>!()_~`$%&*+,/;=@^]"," ",item)
-        item<-gsub("heartsymbolplaceholder","<3",item)
         item<-gsub("[[:digit:]]+"," ::number:: ",item)
         set<-append(set,item)
     }
     return(set)
 }
 
+analyzesample<-function(sample,top) {
+    wordlist<-data.frame()
+    for(line in sample) {
+        words<-unique(strsplit(line," ")[[1]])
+        for(word in words) {
+            if(nchar(word)>2) {
+                if(word %in% wordlist$word) wordlist$count[wordlist$word==word]<-wordlist$count[wordlist$word==word]+1
+                else wordlist<-rbind(wordlist,data.frame(word=word,count=1))                
+            }
+        }
+    }
+    wordlist$percofdocs<-round(wordlist$count/length(sample)*100,2)
+    wordlist<-subset(wordlist,select= -count)
+    wordlist<-wordlist[order(-wordlist$percofdocs),]
+    return(head(wordlist,top))
+}
+
 tokenizesample<-function(sample,ngramsize) {
-    ngrams<-list()
-    item<-sample[1]
     for(item in sample) {
         words<-strsplit(item," ")[[1]]
+        words<-words[words!=""]
         counter<-1
-        while ((counter+ngramsize-1)<length(words)) {
+        while ((counter+ngramsize-2)<length(words)) {
             set<-words[counter:(counter+ngramsize-1)]
+            output<-set[length(set)]
+            predictor<-paste(set[1:(length(set)-1)],collapse=" ")
             counter<-counter+1
-            ngrams<-append(ngrams,list(set))
+            if(!exists("ngrams")) ngrams<-data.frame(predictor=predictor,output=output)
+            else ngrams<-rbind(ngrams,data.frame(predictor=predictor,output=output))
         }
     }
     
     return(ngrams)
 }
 
-analyzesample<-function(sample) {
-    wordlist<-vector()
-    for(line in sample) {
-        for(word in line) {
-            wordlist<-append(wordlist,word)
-        }
-    }
-    wordlist<-unique(wordlist)
-    wordlist<-wordlist[sapply(wordlist,function(x) nchar(x)>2)]
-    wordframe<-data.frame(word=wordlist,count=0)
-    for(word in wordlist) {
-        wordcount<-sum(grepl(word,sample,fixed=T))
-        wordframe[wordframe$word==word,"count"]<-wordcount
-    }
-    wordframe<-wordframe[order(-wordframe$count),]
-    wordframe<-wordframe[wordframe$count>1,]
-    return(head(wordframe,100))
+trainsplit <- function(ngrams,perc) {
+    keep<-trunc(length(ngrams)*perc)
+    trainset<-ngrams[keep]
+    testset<-ngrams[!keep]
+    splitdata<-list(trainset=trainset,testset=testset)
+    return(splitdata)
 }
+
+##TestRun
+if(!exists("twitter")) twitter<-readfile("twitter")
+twitter<-sample(twitter,trunc(length(twitter)/10))
+twitter<-scrubsample(twitter)
+print(system.time(ngrams<-tokenizesample(twitter,3)))
+splitdata<-trainsplit(ngrams,0.6)
+trainset<-splitdata$trainset
+testset<-splitdata$testset

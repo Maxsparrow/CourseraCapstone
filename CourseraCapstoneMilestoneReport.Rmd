@@ -1,0 +1,121 @@
+---
+title: "Coursera Capstone Milestone Report"
+author: "Chris Johnson"
+date: "Saturday, March 28, 2015"
+output: html_document
+---
+
+The dataset being analyzed is from HC Corpora. There are twitter, news, and blog post files. In this report I will do a basic exploratory analysis. I took a random sample of 1/1000th of each file for analysis for this report, since the corpus is so large.
+
+```{r,echo=FALSE,cache=TRUE}
+dirpath<-"final/en_US/"
+
+readfile<-function(filetype) {
+    curfile<-file(paste0(dirpath,"en_US.",filetype,".txt"))
+    output<-readLines(curfile)
+    close(curfile)
+    return(output)
+}
+
+getsample<-function(file) {    
+    sample<-sample(file,trunc(length(file)/1000))
+    return(sample)
+}
+```
+
+Below are the number of documents in each file. This is for the whole corpus and is not an estimate based on the samples.
+
+```{r,echo=FALSE,cache=TRUE}
+twitter<-suppressWarnings(readfile("twitter"))
+print(paste0("Twitter file number of documents: ",length(twitter)))
+twitter<-getsample(twitter)
+temp<-gc()
+```
+
+```{r,echo=FALSE,cache=TRUE}
+news<-suppressWarnings(readfile("news"))
+print(paste0("News file number of documents: ",length(news)))
+news<-getsample(news)
+temp<-gc()
+```
+
+```{r,echo=FALSE,cache=TRUE}
+blogs<-suppressWarnings(readfile("blogs"))
+print(paste0("Blogs file number of documents: ",length(blogs)))
+blogs<-getsample(blogs)
+temp<-gc()
+```
+
+Next let's look at an estimated total word count for the total corpus by using the sample for each file.
+
+```{r,echo=FALSE,cache=TRUE}
+countwords<-function(sample) {
+    count<-0
+    for(line in sample) {count<-count+length(strsplit(line," ")[[1]])}
+    return(count)
+}
+print(paste0("Estimated number of words in twitter file: ",countwords(twitter)*1000))
+print(paste0("Estimated number of words in news file: ",countwords(news)*1000))
+print(paste0("Estimated number of words in blogs file: ",countwords(blogs)*1000))
+```
+
+Next we'll find the 10 words that show up in the most documents for each document type, and compare them. Words with 2 or less characters are ignored.
+
+```{r,echo=FALSE,cache=TRUE}
+scrubsample<-function(sample) {
+    set<-vector()
+    for(item in sample) {
+        item<-gsub("[[:punct:]]"," ",item)
+        item<-gsub("[[:digit:]]+"," ::number:: ",item)
+        set<-append(set,item)
+    }
+    return(set)
+}
+
+analyzesample<-function(sample,top) {
+    wordlist<-data.frame()
+    for(line in sample) {
+        words<-unique(strsplit(line," ")[[1]])
+        for(word in words) {
+            if(nchar(word)>2) {
+                if(word %in% wordlist$word) wordlist$count[wordlist$word==word]<-wordlist$count[wordlist$word==word]+1
+                else wordlist<-rbind(wordlist,data.frame(word=word,count=1))                
+            }
+        }
+    }
+    wordlist$percofdocs<-round(wordlist$count/length(sample)*100,2)
+    wordlist<-subset(wordlist,select= -count)
+    wordlist<-wordlist[order(-wordlist$percofdocs),]
+    return(head(wordlist,top))
+}
+```
+
+```{r,cache=TRUE,echo=FALSE}
+twitter<-scrubsample(twitter)
+toptweet<-analyzesample(twitter,10)
+colnames(toptweet)[2]<-"twitterpercofdocs"
+```
+```{r,cache=TRUE,echo=FALSE}
+news<-scrubsample(news)
+topnews<-analyzesample(news,10)
+colnames(topnews)[2]<-"newspercofdocs"
+```
+```{r,cache=TRUE,echo=FALSE}
+blogs<-scrubsample(blogs)
+topblogs<-analyzesample(blogs,10)
+colnames(topblogs)[2]<-"blogspercofdocs"
+```
+
+```{r,echo=FALSE,cache=TRUE}
+wordcompare<-merge(merge(toptweet,topnews,by="word",all=T),topblogs,by="word",all=T)
+means<-vector()
+for(row in 1:nrow(wordcompare)) {
+    means<-c(means,mean(as.numeric(wordcompare[row,2:4]),na.rm=T))
+}
+wordcompare$mean<-means
+wordcompare<-wordcompare[order(-wordcompare$mean),]
+wordcompare<-subset(wordcompare,select=-mean)
+print(wordcompare)
+```
+
+From this, we can see that on twitter, grammatical words like 'the' and 'and' are used much less frequently, so prediction for the medium may need to be different from the others. Also it's interesting to note the news uses the word 'said' quite frequently, and uses numbers much more than blogs or twitter.
