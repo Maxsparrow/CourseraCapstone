@@ -1,11 +1,4 @@
-dirpath<-"Data Scientist Specialization/CourseraCapstone/final/en_US/"
-
-readfile<-function(filetype) {
-    curfile<-file(paste0(dirpath,"en_US.",filetype,".txt"))
-    output<-readLines(curfile)
-    close(curfile)
-    return(output)
-}
+library(stringdist)
 
 summarizefile<-function(file) {
     print(paste0('Number of documents in file: ',length(file)))
@@ -31,22 +24,22 @@ getsample<-function(file,size) {
     return(sample)
 }
 
+inputsearch<-function(file,input) {
+    output<-file[grepl(input,file)]
+    if(length(output)<500) {
+        splitinput<-strsplit(input," ")[[1]]
+        minmatch<-round(length(splitinput)*0.75)
+        for(i in 1:(length(splitinput)-minmatch+1)) {
+            output<-c(output,file[grepl(paste(splitinput[i:(i+minmatch-1)],collapse=" "),file)])
+        }
+    }
+    return(output)
+}
+
 countwords<-function(sample) {
     count<-0
     for(line in sample) {count<-count+length(strsplit(line," ")[[1]])}
     return(count)
-}
-
-scrubsample<-function(sample) {
-    set<-vector()
-    for(item in sample) {
-        Encoding(item)<-"latin1"
-        item<-iconv(item,"latin1","ASCII",sub="")
-        item<-gsub("[-?:.\"<>!()_~`$%&*+,/;=@^]"," ",item)
-        item<-gsub("[[:digit:]]+"," ::number:: ",item)
-        set<-append(set,item)
-    }
-    return(set)
 }
 
 analyzesample<-function(sample,top) {
@@ -66,7 +59,8 @@ analyzesample<-function(sample,top) {
     return(head(wordlist,top))
 }
 
-tokenizesample<-function(sample,ngramsize) {
+improvedtokenizesample<-function(sample,input) {
+    ngramsize<-length(strsplit(input," ")[[1]])+1
     for(item in sample) {
         words<-strsplit(item," ")[[1]]
         words<-words[words!=""]
@@ -76,27 +70,90 @@ tokenizesample<-function(sample,ngramsize) {
             output<-set[length(set)]
             predictor<-paste(set[1:(length(set)-1)],collapse=" ")
             counter<-counter+1
-            if(!exists("ngrams")) ngrams<-data.frame(predictor=predictor,output=output)
-            else ngrams<-rbind(ngrams,data.frame(predictor=predictor,output=output))
+            if(predictor==input) {
+                if(!exists("ngrams")) ngrams<-data.frame(predictor=predictor,output=output)
+                else ngrams<-rbind(ngrams,data.frame(predictor=predictor,output=output))
+            }
+            gc()
         }
     }
-    
+    if(!exists("ngrams") || nrow(ngrams)==0) return(NA)
+    else {
+        ngrams$predictor<-as.character(ngrams$predictor)
+        ngrams$output<-as.character(ngrams$output)    
+        return(ngrams)
+    }
+}
+
+makengrams<-function(textsample,input,subsize=1000) {   
+    if(length(textsample)==0) return(NA)
+    print(paste("Size of text sample:",length(textsample)))
+    if(length(textsample)>subsize) {
+        print(paste0("Sample too large, taking subsample of size ",subsize))
+        textsample<-sample(textsample,subsize)
+    }
+    gc()
+    textsample<-scrubsample(textsample)    
+    ngrams<-improvedtokenizesample(textsample,input)
     return(ngrams)
 }
 
-trainsplit <- function(ngrams,perc) {
-    keep<-trunc(length(ngrams)*perc)
-    trainset<-ngrams[keep]
-    testset<-ngrams[!keep]
-    splitdata<-list(trainset=trainset,testset=testset)
-    return(splitdata)
+loopfindoutput<-function(input,filename="ALL",maxsize=100,samplesize=100,filenumlines=1000000,top=1) {
+    tempinput<-strsplit(input," ")[[1]]
+    if(length(tempinput)>3) {
+        print("Too many words, using last 3 words for input")
+        input<-paste(tempinput[(length(tempinput)-2):length(tempinput)],collapse=" ")
+    }    
+    
+    finaloutput<-data.frame()
+    output<-data.frame() 
+    runcount<-0
+    error<-FALSE
+    
+    repeat{                
+        runcount<-runcount+1
+        print(paste("run number:",runcount))
+        print(paste("current input:",input))
+        
+        textsample<-inputsearch(file,input)
+        rm(file)
+        gc()
+        
+        ngrams<-makengrams(textsample,input,maxsize)
+        
+        if(is.na(ngrams)) {
+            print("Sample too small, retrying with smaller ngram")
+            input<-inputreducer(input)
+            if(is.na(input)) {
+                error<-TRUE
+                break
+            }
+            next
+        }        
+        
+        print(paste("Size of tokenized ngrams:",nrow(ngrams)))
+        
+        output<-findoutput(ngrams,input,top)
+        print("Exact matches:")
+        print(output)        
+        if(!is.na(output)) finaloutput<-rbind(finaloutput,data.frame(output))
+        
+        if(nrow(finaloutput)>=top) {
+            break
+        }
+        print("Match not sufficient, retrying with fewer ngrams")
+        input<-inputreducer(input)
+        if(is.na(input)) {
+            error<-TRUE
+            break
+        }
+    }
+
+    if(error==TRUE) return(enderror())
+    else return(finaloutput)
 }
 
-##TestRun
-if(!exists("twitter")) twitter<-readfile("twitter")
-twitter<-sample(twitter,trunc(length(twitter)/10))
-twitter<-scrubsample(twitter)
-print(system.time(ngrams<-tokenizesample(twitter,3)))
-splitdata<-trainsplit(ngrams,0.6)
-trainset<-splitdata$trainset
-testset<-splitdata$testset
+enderror<-function() {    
+    print("Cannot reduce input any further. No prediction found")
+    return(NA)
+}
